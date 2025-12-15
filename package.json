@@ -1,0 +1,16 @@
+{
+    "name": "naukri-scraper-actor",
+    "version": "1.0.0",
+    "description": "Naukri Scraper Apify Actor",
+    "type": "module",
+    "main": "apify_actor_main.js",
+    "dependencies": {
+        "apify": "^3.1.10",
+        "axios": "^1.6.2"
+    },
+    "scripts": {
+        "start": "node apify_actor_main.js"
+    },
+    "author": "",
+    "license": "ISC"
+}
