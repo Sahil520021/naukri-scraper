@@ -363,14 +363,31 @@ class AsyncNaukriScraper:
             all_tuples = all_tuples[:self.max_results]
             logger.info(f"Total profiles to fetch: {len(all_tuples)}")
             
-            # 4. Fetch Individual Profiles (Concurrent)
-            # The self.sem semaphore ensures we don't blast the API
-            tasks = [self.get_individual_profile(t) for t in all_tuples]
+            # 4. Fetch Individual Profiles (Batched with Delay)
+            # User requirement: Batch size 5, Wait 3s between batches
+            results = []
+            chunk_size = 5
+            batch_delay = 3.0
             
-            # Use asyncio.as_completed or gather. Gather is fine as we want all of them.
-            # We can also add progress logging here if desired using a wrapper.
+            # Split into chunks
+            chunks = [all_tuples[i:i + chunk_size] for i in range(0, len(all_tuples), chunk_size)]
             
-            results = await asyncio.gather(*tasks)
+            logger.info(f"Processing {len(all_tuples)} profiles in {len(chunks)} batches of {chunk_size}...")
+            
+            for i, chunk in enumerate(chunks):
+                logger.info(f"Starting batch {i+1}/{len(chunks)} ({len(chunk)} profiles)...")
+                
+                # Create tasks for this batch
+                batch_tasks = [self.get_individual_profile(t) for t in chunk]
+                
+                # Execute batch concurrently
+                batch_results = await asyncio.gather(*batch_tasks)
+                results.extend(batch_results)
+                
+                # Wait if not the last batch to be polite/safe
+                if i < len(chunks) - 1:
+                    logger.info(f"Batch {i+1} done. Waiting {batch_delay}s...")
+                    await asyncio.sleep(batch_delay)
             
             # Filter successful and Format
             formatted_candidates = []
