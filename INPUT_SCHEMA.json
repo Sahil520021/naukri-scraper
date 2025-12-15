@@ -1,0 +1,24 @@
+{
+    "title": "Naukri Scraper Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "curlCommand": {
+            "title": "cURL Command",
+            "type": "string",
+            "description": "Paste the cURL command from Chrome DevTools (Network Tab -> Right Click -> Copy as cURL).",
+            "editor": "textarea",
+            "prefill": "curl 'https://resdex.naukri.com/...' ..."
+        },
+        "maxResults": {
+            "title": "Maximum Profiles to Fetch",
+            "type": "integer",
+            "description": "Limit the number of profiles to scrape. Leave empty for default.",
+            "default": 100,
+            "minimum": 1
+        }
+    },
+    "required": [
+        "curlCommand"
+    ]
+}
