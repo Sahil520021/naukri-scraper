@@ -9,15 +9,13 @@ import re
 import json
 import random
 import time
-import asyncio
-import logging
+import requests
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-
-import aiohttp
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
+from http.cookies import SimpleCookie
 
 # Setup logging
 logging.basicConfig(
@@ -34,20 +32,23 @@ class ScraperInput(BaseModel):
     proxyUrl: Optional[str] = None
 
 
-class AsyncNaukriScraper:
+class NaukriScraper:
     def __init__(self, curl_command: str, max_results: int = 50, concurrency: int = 10, proxy_url: str = None):
         self.curl_command = curl_command
         self.max_results = max_results
         self.concurrency = concurrency
         self.proxy_url = proxy_url
+        # Use simple session, concurrency managed by caller via threads
+        self.session = requests.Session()
         
-        # Configuration
-        self.max_retries = 3
-        # We'll use a semaphore to limit concurrency for *this specific request*
-        self.sem = asyncio.Semaphore(concurrency)
-        
-        # Session state
-        self.session: Optional[aiohttp.ClientSession] = None
+        # Configure Proxy if present
+        if self.proxy_url:
+            self.session.proxies = {
+                'http': self.proxy_url,
+                'https': self.proxy_url
+            }
+
+        logging.basicConfig(level=logging.INFO)
         
         # Extracted data
         self.url: Optional[str] = None
@@ -55,6 +56,7 @@ class AsyncNaukriScraper:
         self.body: Dict[str, Any] = {}
         self.sid: Optional[str] = None
         self.sid_group_id: Optional[str] = None
+        self.cookies_dict: Dict[str, str] = {}
         
     @staticmethod
     def _random_string(length: int) -> str:
@@ -195,36 +197,94 @@ class AsyncNaukriScraper:
         logger.info(f"DEBUG Body keys: {list(self.body.keys())}")
         
         # 60s timeout to prevent hanging
-        async with self.session.post(self.url, headers=headers, json=self.body, timeout=60, proxy=self.proxy_url) as response:
-            if response.status != 200:
-                text = await response.text()
-                raise HTTPException(status_code=response.status, detail=f"Search failed: {text}")
-                
-            data = await response.json()
+        response = self.session.post(self.url, headers=headers, json=self.body, timeout=60)
+        
+        if response.status_code != 200:
+            text = response.text
+            raise HTTPException(status_code=response.status_code, detail=f"Search failed: {text}")
             
-            # Check for cookie updates - DISABLED 
-            # (Matches n8n behavior: uses original cURL cookie for all requests)
-            # if response.cookies:
-            #     for key, morsel in response.cookies.items():
-            #         self.cookies_dict[key] = morsel.value
-            #     self._update_cookie_header()
-            #     logger.info(f"Updated cookies from response. Count: {len(self.cookies_dict)}")
+        data = response.json()
+            
+        # Check for cookie updates - DISABLED 
+        # (Matches n8n behavior: uses original cURL cookie for all requests)
+        # if response.cookies:
+        #     for key, morsel in response.cookies.items():
+        #         self.cookies_dict[key] = morsel.value
+        #     self._update_cookie_header()
+        #     logger.info(f"Updated cookies from response. Count: {len(self.cookies_dict)}")
 
-            # Extract session data
-            self.sid = data.get('sid')
-            self.sid_group_id = data.get('searchParams', {}).get('sidGroupId')
+        # Extract session data
+        self.sid = data.get('sid')
+        self.sid_group_id = data.get('searchParams', {}).get('sidGroupId')
+        
+        if not self.sid:
+            # Some API versions might return sid differently
+            raise ValueError("Could not find 'sid' in search response")
             
-            if not self.sid:
-                # Some API versions might return sid differently
-                raise ValueError("Could not find 'sid' in search response")
-                
-            return {
-                'tuples': data.get('tuples', []),
-                'totalResumes': data.get('totalResumes', 0)
+        return {
+            'tuples': data.get('tuples', []),
+            'totalResumes': data.get('totalResumes', 0)
+        }
+
+    def get_individual_profile(self, profile: Dict) -> Optional[Dict]:
+        """
+        Fetch detailed profile information (Synchronous).
+        """
+        is_lite = '/rdxLite/' in (self.url or '')
+        path_type = 'rdxlite' if is_lite else 'rdx'
+        
+        company_id = self.body['miscellaneousInfo']['companyId']
+        rdx_user_id = self.body['miscellaneousInfo']['rdxUserId']
+        
+        detail_url = f"https://resdex.naukri.com/cloudgateway-resdex/recruiter-js-profile-services/v0/companies/{company_id}/recruiters/{rdx_user_id}/{path_type}/jsprofile"
+        
+        page_name = 'rdxLitePreview' if is_lite else 'rdxPreview'
+        flow_name = 'rdxLiteSrp' if is_lite else 'rdxSrp'
+        
+        payload = {
+            'uniqId': profile.get('dynamicEncryptedUniqueId'),
+            'pageName': page_name,
+            'uname': None,
+            'sid': str(self.sid),
+            'requirementId': str(self.body.get('requirementId')),
+            'requirementGroupId': str(self.body.get('requirementId')),
+            'jsKey': profile.get('dynamicEncryptedJsKey'),
+            'miscellaneousInfo': {
+                'companyId': company_id,
+                'rdxUserId': rdx_user_id,
+                'resendOtp': False,
+                'flowName': flow_name
             }
+        }
+        
+        headers = self.headers.copy()
+        headers['x-transaction-id'] = self._generate_transaction_id()
+         
+        # Make the synchronous request
+        tuple_id = profile.get('tupleId', 'Unknown')
+        for attempt in range(3):
+            try:
+                response = self.session.post(detail_url, headers=headers, json=payload, timeout=20)
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code in [403, 429]:
+                    logger.warning(f"Rate limited (403/429) for {tuple_id}. Retrying {attempt+1}/3...")
+                    time.sleep(2 * (attempt + 1)) # Blocking sleep is fine in thread
+                else:
+                    logger.error(f"Failed to fetch profile {tuple_id}: {response.status_code}")
+                    if response.status_code == 401:
+                        break
+            except Exception as e:
+                logger.error(f"Error fetching profile {tuple_id}: {e}")
+            
+            time.sleep(1)
+        return None
 
-    async def get_page(self, page_no: int) -> List[Dict]:
-        """Fetch a specific page of results"""
+    def get_page(self, page_no: int) -> List[Dict]:
+        """
+        Fetch a specific page of results.
+        Returns a list of profile tuples (minimal info).
+        """
         if not self.url or not self.sid:
             return []
             
@@ -247,67 +307,17 @@ class AsyncNaukriScraper:
         }
         
         try:
-            async with self.session.post(base_url, headers=headers, json=payload, proxy=self.proxy_url) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data.get('tuples', [])
-                else:
-                    logger.error(f"Failed to fetch page {page_no}: Status {response.status}")
-                    return []
+            response = self.session.post(base_url, headers=headers, json=payload, timeout=30)
+            if response.status_code == 200:
+                data = response.json()
+                return data.get('tuples', [])
+            else:
+                logger.error(f"Failed to fetch page {page_no}: {response.status_code}")
+                return []
         except Exception as e:
             logger.error(f"Error fetching page {page_no}: {e}")
             return []
 
-    async def get_individual_profile(self, profile: Dict) -> Optional[Dict]:
-        async with self.sem:
-            is_lite = '/rdxLite/' in (self.url or '')
-            path_type = 'rdxlite' if is_lite else 'rdx'
-            
-            company_id = self.body['miscellaneousInfo']['companyId']
-            rdx_user_id = self.body['miscellaneousInfo']['rdxUserId']
-            
-            detail_url = f"https://resdex.naukri.com/cloudgateway-resdex/recruiter-js-profile-services/v0/companies/{company_id}/recruiters/{rdx_user_id}/{path_type}/jsprofile"
-            
-            page_name = 'rdxLitePreview' if is_lite else 'rdxPreview'
-            flow_name = 'rdxLiteSrp' if is_lite else 'rdxSrp'
-            
-            payload = {
-                'uniqId': profile.get('dynamicEncryptedUniqueId'),
-                'pageName': page_name,
-                'uname': None,
-                'sid': str(self.sid),
-                'requirementId': str(self.body.get('requirementId')),
-                'requirementGroupId': str(self.body.get('requirementId')),
-                'jsKey': profile.get('dynamicEncryptedJsKey'),
-                'miscellaneousInfo': {
-                    'companyId': company_id,
-                    'rdxUserId': rdx_user_id,
-                    'resendOtp': False,
-                    'flowName': flow_name
-                }
-            }
-            
-            headers = self.headers.copy()
-            headers['x-transaction-id'] = self._generate_transaction_id()
-             
-            for attempt in range(self.max_retries):
-                try:
-                    async with self.session.post(detail_url, headers=headers, json=payload, proxy=self.proxy_url) as response:
-                        if response.status == 200:
-                            return await response.json()
-                        elif response.status in [403, 429]:
-                            logger.warning(f"Rate limited ({response.status}). Pausing...")
-                            await asyncio.sleep(2 * (attempt + 1))
-                        else:
-                            # Log warning but don't spam body unless critical
-                            logger.warning(f"Profile fetch failed: Status {response.status}")
-                            if response.status == 401:
-                                break
-                except Exception as e:
-                    logger.error(f"Profile fetch error: {e}")
-                
-                await asyncio.sleep(1)
-            return None
 
     async def run(self):
         """Execute the full scraping workflow"""
@@ -323,110 +333,98 @@ class AsyncNaukriScraper:
         timeout = aiohttp.ClientTimeout(total=600) # 10 minutes total
         async with aiohttp.ClientSession(timeout=timeout) as session:
             self.session = session
+        self.parse_curl()
+        
+        # 1. Initial Search (Sync wrapped in Thread)
+        try:
+            search_res = await asyncio.to_thread(self.initial_search)
+        except Exception as e:
+            logger.error(f"Initial Search Traceback: {traceback.format_exc()}")
+            raise HTTPException(status_code=500, detail=f"Initial Search Error: {str(e)}")
             
-            start_time = time.time()
+        initial_tuples = search_res.get('tuples', [])
+        total_resumes = search_res.get('totalResumes', 0)
+        
+        all_tuples = initial_tuples
+        
+        # 2. Pagination (if needed)
+        MAX_REQUESTED = self.max_results
+        
+        if MAX_REQUESTED > 50 and total_resumes > 50:
+             # Calculate how many extra pages we need
+             needed = MAX_REQUESTED - 50
+             pages_to_fetch = []
+             # Start from page 2. Each page usually has 50 results
+             # Page 1 gave 50. We have 'needed' more.
+             # e.g. needed=50 -> fetch page 2
+             # e.g. needed=100 -> fetch page 2, 3
+             
+             current_count = 50
+             page_idx = 2
+             
+             while current_count < MAX_REQUESTED and current_count < total_resumes:
+                 pages_to_fetch.append(page_idx)
+                 current_count += 50
+                 page_idx += 1
             
-            # 2. Initial Search
-            try:
-                search_res = await self.initial_search()
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                logger.error(f"Initial Search Traceback: {traceback.format_exc()}")
-                return {'success': False, 'error': f"Initial Search Error: {repr(e)}"}
-                
-            all_tuples = search_res['tuples']
+             logger.info(f"Pagination required. Fetching pages: {pages_to_fetch}")
+             
+             # Fetch pages in batches of 1 with 3s delay (Sync wrapped in Threads)
+             page_batch_size = 1
+             for i in range(0, len(pages_to_fetch), page_batch_size):
+                 batch = pages_to_fetch[i:i + page_batch_size]
+                 
+                 # Concurrent fetch for the batch (though batch is 1 here)
+                 # We use asyncio.gather to run threads in parallel if batch > 1
+                 tasks = [asyncio.to_thread(self.get_page, p) for p in batch]
+                 results = await asyncio.gather(*tasks)
+                 
+                 for res in results:
+                     all_tuples.extend(res)
+                     
+                 if i + page_batch_size < len(pages_to_fetch):
+                     await asyncio.sleep(3.0) 
+        
+        # Trim to exact requested count
+        all_tuples = all_tuples[:MAX_REQUESTED]
+        logger.info(f"Total profiles to fetch details for: {len(all_tuples)}")
+        
+        # 3. Fetch Individual Profiles (Sync wrapped in Threads)
+        detailed_profiles = []
+        failed_count = 0
+        
+        # Process in chunks of 5 with 2s delay
+        chunk_size = 5
+        for i in range(0, len(all_tuples), chunk_size):
+            chunk = all_tuples[i:i + chunk_size]
+            
+            # Fan out threads for this chunk
+            tasks = [asyncio.to_thread(self.get_individual_profile, p) for p in chunk]
+            results = await asyncio.gather(*tasks)
+            
+            for res in results:
+                if res and 'profile' in res:
+                    formatted = self._format_profile(res['profile'])
+                    detailed_profiles.append(formatted)
+                else:
+                    failed_count += 1
+            
+            # Delay between chunks
+            if i + chunk_size < len(all_tuples):
+                await asyncio.sleep(2.0)
 
-            total_available = search_res['totalResumes']
-            logger.info(f"Initial search found {total_available} resumes. Loaded {len(all_tuples)}.")
-            
-            # 3. Fetch Additional Pages (Concurrent)
-            # Calculate how many pages we need
-            # Standard page size is 50
-            needed = self.max_results - len(all_tuples)
-            if needed > 0 and total_available > len(all_tuples):
-                pages_to_fetch = []
-                # Page 1 is already fetched. Start from 2.
-                # Max pages limit? Let's say max 20 pages (1000 profiles) to be safe for now
-                # User config maxResults dictates this.
-                current_count = len(all_tuples)
-                page_idx = 2
-                
-                while current_count < self.max_results and page_idx <= 20: 
-                    pages_to_fetch.append(page_idx)
-                    current_count += 50
-                    page_idx += 1
-                
-                logger.info(f"Fetching {len(pages_to_fetch)} additional pages (Batched)...")
-                
-                # Fetch pages in batches (Batch 1, Wait 3s)
-                page_chunk_size = 1
-                page_batch_delay = 3.0
-                page_chunks = [pages_to_fetch[i:i + page_chunk_size] for i in range(0, len(pages_to_fetch), page_chunk_size)]
-
-                for i, p_chunk in enumerate(page_chunks):
-                    logger.info(f"Fetching page batch {i+1}/{len(page_chunks)} ({p_chunk})...")
-                    p_tasks = [self.get_page(p) for p in p_chunk]
-                    p_results = await asyncio.gather(*p_tasks)
-                    
-                    for p_res in p_results:
-                        all_tuples.extend(p_res)
-                        
-                    if i < len(page_chunks) - 1:
-                        logger.info(f"Page batch {i+1} done. Waiting {page_batch_delay}s...")
-                        await asyncio.sleep(page_batch_delay)
-            
-            # Trim to max results
-            all_tuples = all_tuples[:self.max_results]
-            logger.info(f"Total profiles to fetch: {len(all_tuples)}")
-            
-            # 4. Fetch Individual Profiles (Batched with Delay)
-            # User requirement: Batch size 5, Wait 2s between batches
-            results = []
-            chunk_size = 5
-            batch_delay = 2.0
-            
-            # Split into chunks
-            chunks = [all_tuples[i:i + chunk_size] for i in range(0, len(all_tuples), chunk_size)]
-            
-            logger.info(f"Processing {len(all_tuples)} profiles in {len(chunks)} batches of {chunk_size}...")
-            
-            for i, chunk in enumerate(chunks):
-                logger.info(f"Starting batch {i+1}/{len(chunks)} ({len(chunk)} profiles)...")
-                
-                # Create tasks for this batch
-                batch_tasks = [self.get_individual_profile(t) for t in chunk]
-                
-                # Execute batch concurrently
-                batch_results = await asyncio.gather(*batch_tasks)
-                results.extend(batch_results)
-                
-                # Wait if not the last batch to be polite/safe
-                if i < len(chunks) - 1:
-                    logger.info(f"Batch {i+1} done. Waiting {batch_delay}s...")
-                    await asyncio.sleep(batch_delay)
-            
-            # Filter successful and Format
-            formatted_candidates = []
-            for r in results:
-                if r:
-                    formatted_candidates.append(self._format_profile(r))
-            
-            failed = len(results) - len(formatted_candidates)
-            duration = time.time() - start_time
-            
-            logger.info(f"Scraping completed. Fetched: {len(formatted_candidates)}, Failed: {failed}")
-            
-            return {
-                'success': True,
-                'totalCandidates': len(formatted_candidates),
-                'scrapedAt': datetime.now().isoformat(),
-                'candidates': formatted_candidates,
-                'debug_info': { # Keeping debug info for reference, though user didn't ask explicitly allowed
-                    'time_taken_seconds': round(duration, 2),
-                    'total_failed': failed
-                }
+        return {
+            "totalCandidates": total_resumes,
+            "candidates": detailed_profiles,
+            "debug_info": {
+                 "requested": MAX_REQUESTED,
+                 "fetched_count": len(detailed_profiles),
+                 "failed_count": failed_count,
+                 "pages_fetched": 1 + (len(pages_to_fetch) if 'pages_to_fetch' in locals() else 0)
             }
+        }
+
+
 
     def _format_profile(self, data: Dict) -> Dict:
         """Map raw Naukri profile to desired output schema"""
@@ -523,16 +521,17 @@ app = FastAPI(title="Naukri Async Scraper")
 async def scrape(input_data: ScraperInput):
     """
     Endpoint for Apify Actor.
-    Each request spawns a new AsyncNaukriScraper instance.
-    This ensures isolation between multiple users calling this endpoint simultaneously.
+    Each request spawns a new NaukriScraper instance.
+    Runs asynchronously using threads for network I/O.
     """
     logger.info(f"Received scrape request. Max: {input_data.maxResults}. Proxy: {'Yes' if input_data.proxyUrl else 'No'}")
-    scraper = AsyncNaukriScraper(
+    scraper = NaukriScraper(
         curl_command=input_data.curlCommand, 
         max_results=input_data.maxResults,
         concurrency=input_data.concurrency,
         proxy_url=input_data.proxyUrl
     )
+    # run() is async so we await it
     return await scraper.run()
 
 @app.get("/health")
