@@ -1,0 +1,33 @@
+INFO:     Started server process [93696]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:51021 - "GET /health HTTP/1.1" 200 OK
+2025-12-15 14:52:43,730 - NaukriScraper - INFO - Received scrape request. Max: 5. Proxy: No
+2025-12-15 14:52:43,730 - NaukriScraper - INFO - Parsing cURL command...
+2025-12-15 14:52:43,730 - NaukriScraper - INFO - Raw cURL input length: 4586
+2025-12-15 14:52:43,730 - NaukriScraper - INFO - Raw cURL start (first 100 chars): "\ncurl 'https://resdex.naukri.com/cloudgateway-resdex/recruiter-js-profile-listing-services/v0/rdxLit"
+2025-12-15 14:52:43,730 - NaukriScraper - INFO - Normalized cURL (first 100 chars): " curl 'https://resdex.naukri.com/cloudgateway-resdex/recruiter-js-profile-listing-services/v0/rdxLit"
+2025-12-15 14:52:43,730 - NaukriScraper - INFO - Cookies parsed successfully.
+2025-12-15 14:52:43,731 - NaukriScraper - INFO - Performing initial search...
+2025-12-15 14:52:43,731 - NaukriScraper - INFO - DEBUG Headers keys: ['cookie', 'accept', 'accept-language', 'appid', 'content-type', 'origin', 'referer', 'sec-ch-ua-mobile', 'sec-fetch-dest', 'sec-fetch-mode', 'sec-fetch-site', 'systemid', 'user-agent', 'x-transaction-id']
+2025-12-15 14:52:43,731 - NaukriScraper - INFO - DEBUG Cookie length: 3282
+2025-12-15 14:52:43,731 - NaukriScraper - INFO - DEBUG Cookie start: geo_country=IN; J=0; ninjas_new_marketing_token=13
+2025-12-15 14:52:43,731 - NaukriScraper - INFO - DEBUG Body keys: ['requirementId', 'newCandidatesSearch', 'saveSession', 'requirementGroupId', 'miscellaneousInfo']
+2025-12-15 14:52:43,877 - NaukriScraper - ERROR - Naukri Search API Failed. Status: 401, Body: {"session":null,"error":"INVALID_SESSION"}
+2025-12-15 14:52:43,879 - NaukriScraper - ERROR - Initial Search Traceback: Traceback (most recent call last):
+  File "/Users/sahilmehra/naukri_scraper/naukri_scraper_async.py", line 338, in run
+    search_res = await asyncio.to_thread(self.initial_search)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sahilmehra/.pyenv/versions/3.12.5/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sahilmehra/.pyenv/versions/3.12.5/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sahilmehra/naukri_scraper/naukri_scraper_async.py", line 208, in initial_search
+    raise HTTPException(status_code=response.status_code, detail=f"Search failed: {text}")
+fastapi.exceptions.HTTPException
+
+INFO:     127.0.0.1:51022 - "POST /scrape HTTP/1.1" 500 Internal Server Error
+cess [93310]

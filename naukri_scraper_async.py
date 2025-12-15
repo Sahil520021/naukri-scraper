@@ -185,7 +185,7 @@ class NaukriScraper:
             }
         }
 
-    async def initial_search(self) -> Dict:
+    def initial_search(self) -> Dict:
         """Perform initial search request to establish session and get first page"""
         logger.info("Performing initial search...")
         
@@ -204,6 +204,7 @@ class NaukriScraper:
         
         if response.status_code != 200:
             text = response.text
+            logger.error(f"Naukri Search API Failed. Status: {response.status_code}, Body: {text}")
             raise HTTPException(status_code=response.status_code, detail=f"Search failed: {text}")
             
         data = response.json()
@@ -337,7 +338,9 @@ class NaukriScraper:
             search_res = await asyncio.to_thread(self.initial_search)
         except Exception as e:
             logger.error(f"Initial Search Traceback: {traceback.format_exc()}")
-            raise HTTPException(status_code=500, detail=f"Initial Search Error: {str(e)}")
+            status = getattr(e, 'status_code', 500)
+            detail = getattr(e, 'detail', str(e))
+            raise HTTPException(status_code=status, detail=f"Initial Search Error: {detail}")
             
         initial_tuples = search_res.get('tuples', [])
         total_resumes = search_res.get('totalResumes', 0)
