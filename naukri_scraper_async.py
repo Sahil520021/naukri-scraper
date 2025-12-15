@@ -184,6 +184,13 @@ class AsyncNaukriScraper:
         
         headers = self.headers.copy()
         headers['x-transaction-id'] = self._generate_transaction_id()
+    
+        # DEBUG: Print exact headers and body
+        logger.info(f"DEBUG Headers keys: {list(headers.keys())}")
+        logger.info(f"DEBUG Cookie length: {len(headers.get('cookie', ''))}")
+        if 'cookie' in headers:
+            logger.info(f"DEBUG Cookie start: {headers['cookie'][:50]}")
+        logger.info(f"DEBUG Body keys: {list(self.body.keys())}")
         
         # 30s timeout to prevent hanging
         async with self.session.post(self.url, headers=headers, json=self.body, timeout=30) as response:
