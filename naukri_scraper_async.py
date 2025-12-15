@@ -331,13 +331,7 @@ class NaukriScraper:
         except Exception as e:
             return {'success': False, 'error': f"CURL Parsing Error: {str(e)}"}
 
-        # Initialize Session
-        # We don't set default headers here because we want full control per request
-        timeout = aiohttp.ClientTimeout(total=600) # 10 minutes total
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            self.session = session
-        self.parse_curl()
-        
+
         # 1. Initial Search (Sync wrapped in Thread)
         try:
             search_res = await asyncio.to_thread(self.initial_search)
