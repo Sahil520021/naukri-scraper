@@ -348,16 +348,24 @@ class AsyncNaukriScraper:
                     current_count += 50
                     page_idx += 1
                 
-                logger.info(f"Fetching {len(pages_to_fetch)} additional pages concurrently...")
+                logger.info(f"Fetching {len(pages_to_fetch)} additional pages (Batched)...")
                 
-                # Fetch pages concurrently
-                # Ideally utilize a separate semaphore for pages if strict about traffic,
-                # but pages are few compared to profiles.
-                page_tasks = [self.get_page(p) for p in pages_to_fetch]
-                page_results = await asyncio.gather(*page_tasks)
-                
-                for p_res in page_results:
-                    all_tuples.extend(p_res)
+                # Fetch pages in batches (Batch 5, Wait 3s)
+                page_chunk_size = 5
+                page_batch_delay = 3.0
+                page_chunks = [pages_to_fetch[i:i + page_chunk_size] for i in range(0, len(pages_to_fetch), page_chunk_size)]
+
+                for i, p_chunk in enumerate(page_chunks):
+                    logger.info(f"Fetching page batch {i+1}/{len(page_chunks)} ({p_chunk})...")
+                    p_tasks = [self.get_page(p) for p in p_chunk]
+                    p_results = await asyncio.gather(*p_tasks)
+                    
+                    for p_res in p_results:
+                        all_tuples.extend(p_res)
+                        
+                    if i < len(page_chunks) - 1:
+                        logger.info(f"Page batch {i+1} done. Waiting {page_batch_delay}s...")
+                        await asyncio.sleep(page_batch_delay)
             
             # Trim to max results
             all_tuples = all_tuples[:self.max_results]
