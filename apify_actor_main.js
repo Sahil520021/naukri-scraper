@@ -40,13 +40,24 @@ try {
 
     const startTime = Date.now();
 
+    // 2. Setup Proxy
+    const proxyConfig = await Actor.createProxyConfiguration(input.proxyConfiguration);
+    let proxyUrl = null;
+    if (proxyConfig) {
+        proxyUrl = await proxyConfig.newUrl();
+        console.log(`🔒 Using Proxy: ${proxyUrl.split('@')[1] || 'Authenticated'}`); // Log safe part
+    } else {
+        console.log('⚠️  No Proxy configured! Running on Datacenter IP (Risk of blocking).');
+    }
+
     // Call Python scraper service
     const response = await axios.post(
         CONFIG.pythonScraperUrl,
         {
             curlCommand: curlCommand,
             maxResults: maxResults,
-            concurrency: INTERNAL_CONCURRENCY
+            concurrency: INTERNAL_CONCURRENCY,
+            proxyUrl: proxyUrl
         },
         {
             headers: {

@@ -11,11 +11,19 @@
             "prefill": "curl 'https://resdex.naukri.com/...' ..."
         },
         "maxResults": {
-            "title": "Maximum Profiles to Fetch",
+            "title": "Max Results",
             "type": "integer",
-            "description": "Limit the number of profiles to scrape. Leave empty for default.",
-            "default": 100,
-            "minimum": 1
+            "description": "Maximum number of profiles to scrape (default: 50).",
+            "default": 50
+        },
+        "proxyConfiguration": {
+            "title": "Proxy configuration",
+            "type": "object",
+            "description": "Select proxies to be used by your crawler.",
+            "prefill": {
+                "useApifyProxy": true
+            },
+            "editor": "proxy"
         }
     },
     "required": [

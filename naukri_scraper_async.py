@@ -29,15 +29,17 @@ logger = logging.getLogger("NaukriScraper")
 
 class ScraperInput(BaseModel):
     curlCommand: str
-    maxResults: int = 500
-    concurrency: int = 5  # Number of parallel profile fetches per request
+    maxResults: int = 50
+    concurrency: int = 10
+    proxyUrl: Optional[str] = None
 
 
 class AsyncNaukriScraper:
-    def __init__(self, curl_command: str, max_results: int = 500, concurrency: int = 5):
+    def __init__(self, curl_command: str, max_results: int = 50, concurrency: int = 10, proxy_url: str = None):
         self.curl_command = curl_command
         self.max_results = max_results
         self.concurrency = concurrency
+        self.proxy_url = proxy_url
         
         # Configuration
         self.max_retries = 3
@@ -193,7 +195,7 @@ class AsyncNaukriScraper:
         logger.info(f"DEBUG Body keys: {list(self.body.keys())}")
         
         # 60s timeout to prevent hanging
-        async with self.session.post(self.url, headers=headers, json=self.body, timeout=60) as response:
+        async with self.session.post(self.url, headers=headers, json=self.body, timeout=60, proxy=self.proxy_url) as response:
             if response.status != 200:
                 text = await response.text()
                 raise HTTPException(status_code=response.status, detail=f"Search failed: {text}")
@@ -245,7 +247,7 @@ class AsyncNaukriScraper:
         }
         
         try:
-            async with self.session.post(base_url, headers=headers, json=payload) as response:
+            async with self.session.post(base_url, headers=headers, json=payload, proxy=self.proxy_url) as response:
                 if response.status == 200:
                     data = await response.json()
                     return data.get('tuples', [])
@@ -290,7 +292,7 @@ class AsyncNaukriScraper:
              
             for attempt in range(self.max_retries):
                 try:
-                    async with self.session.post(detail_url, headers=headers, json=payload) as response:
+                    async with self.session.post(detail_url, headers=headers, json=payload, proxy=self.proxy_url) as response:
                         if response.status == 200:
                             return await response.json()
                         elif response.status in [403, 429]:
@@ -518,17 +520,18 @@ class AsyncNaukriScraper:
 app = FastAPI(title="Naukri Async Scraper")
 
 @app.post("/scrape")
-async def scrape_endpoint(input_data: ScraperInput):
+async def scrape(input_data: ScraperInput):
     """
     Endpoint for Apify Actor.
     Each request spawns a new AsyncNaukriScraper instance.
     This ensures isolation between multiple users calling this endpoint simultaneously.
     """
-    logger.info(f"Received scrape request. Max: {input_data.maxResults}")
+    logger.info(f"Received scrape request. Max: {input_data.maxResults}. Proxy: {'Yes' if input_data.proxyUrl else 'No'}")
     scraper = AsyncNaukriScraper(
         curl_command=input_data.curlCommand, 
         max_results=input_data.maxResults,
-        concurrency=input_data.concurrency
+        concurrency=input_data.concurrency,
+        proxy_url=input_data.proxyUrl
     )
     return await scraper.run()
 
