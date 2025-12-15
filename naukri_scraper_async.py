@@ -67,10 +67,16 @@ class AsyncNaukriScraper:
         Robust cURL parsing. Extracts URL, Headers, Body, and Cookies.
         """
         logger.info("Parsing cURL command...")
-        
+    
+        # DEBUG LOGGING FOR APIFY
+        logger.info(f"Raw cURL input length: {len(self.curl_command)}")
+        logger.info(f"Raw cURL start (first 100 chars): {self.curl_command[:100]!r}")
+
         # 1. Normalize
         normalized = self.curl_command.replace('\\\n', ' ').replace('\\n', ' ').replace('\n', ' ')
         normalized = re.sub(r'\s+', ' ', normalized)
+        
+        logger.info(f"Normalized cURL (first 100 chars): {normalized[:100]!r}")
         
         # 2. Extract URL
         url_match = re.search(r"curl\s+(?:-X\s+\w+\s+)?[']([^']+)[']", normalized, re.IGNORECASE)
