@@ -123,7 +123,7 @@ class AsyncNaukriScraper:
         for match in header_iter:
             key = match.group(2).strip().lower()
             val = match.group(3).strip()
-            if key == 'cookie': continue
+            if key in ['cookie', 'content-length', 'accept-encoding']: continue
             self.headers[key] = val
 
         # 5. Body
@@ -185,7 +185,8 @@ class AsyncNaukriScraper:
         headers = self.headers.copy()
         headers['x-transaction-id'] = self._generate_transaction_id()
         
-        async with self.session.post(self.url, headers=headers, json=self.body) as response:
+        # 30s timeout to prevent hanging
+        async with self.session.post(self.url, headers=headers, json=self.body, timeout=30) as response:
             if response.status != 200:
                 text = await response.text()
                 raise HTTPException(status_code=response.status, detail=f"Search failed: {text}")
