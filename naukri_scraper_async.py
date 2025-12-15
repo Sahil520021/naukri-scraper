@@ -111,7 +111,7 @@ class AsyncNaukriScraper:
                 for key, morsel in cookie.items():
                     self.cookies_dict[key] = morsel.value
                 
-                logger.info(f"Parsed {len(self.cookies_dict)} cookies from cURL")
+                logger.info(f"Cookies parsed successfully.")
             except Exception as e:
                 logger.error(f"Cookie parsing failed: {e}")
                 # cookie_str is already set in headers, so we are good
@@ -192,8 +192,8 @@ class AsyncNaukriScraper:
             logger.info(f"DEBUG Cookie start: {headers['cookie'][:50]}")
         logger.info(f"DEBUG Body keys: {list(self.body.keys())}")
         
-        # 30s timeout to prevent hanging
-        async with self.session.post(self.url, headers=headers, json=self.body, timeout=30) as response:
+        # 60s timeout to prevent hanging
+        async with self.session.post(self.url, headers=headers, json=self.body, timeout=60) as response:
             if response.status != 200:
                 text = await response.text()
                 raise HTTPException(status_code=response.status, detail=f"Search failed: {text}")

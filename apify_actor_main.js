@@ -33,7 +33,6 @@ try {
     }
 
     console.log(`📊 Requested profiles: ${maxResults}`);
-    console.log(`⚙️  Internal Concurrency: ${INTERNAL_CONCURRENCY}`);
     console.log(`🌐 Backend URL: ${CONFIG.pythonScraperUrl}`);
     console.log(`⏰ Started at: ${new Date().toISOString()}`);
     console.log('');
