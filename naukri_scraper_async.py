@@ -350,8 +350,8 @@ class AsyncNaukriScraper:
                 
                 logger.info(f"Fetching {len(pages_to_fetch)} additional pages (Batched)...")
                 
-                # Fetch pages in batches (Batch 5, Wait 3s)
-                page_chunk_size = 5
+                # Fetch pages in batches (Batch 1, Wait 3s)
+                page_chunk_size = 1
                 page_batch_delay = 3.0
                 page_chunks = [pages_to_fetch[i:i + page_chunk_size] for i in range(0, len(pages_to_fetch), page_chunk_size)]
 
@@ -372,10 +372,10 @@ class AsyncNaukriScraper:
             logger.info(f"Total profiles to fetch: {len(all_tuples)}")
             
             # 4. Fetch Individual Profiles (Batched with Delay)
-            # User requirement: Batch size 5, Wait 3s between batches
+            # User requirement: Batch size 5, Wait 2s between batches
             results = []
             chunk_size = 5
-            batch_delay = 3.0
+            batch_delay = 2.0
             
             # Split into chunks
             chunks = [all_tuples[i:i + chunk_size] for i in range(0, len(all_tuples), chunk_size)]
