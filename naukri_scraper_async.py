@@ -123,7 +123,7 @@ class AsyncNaukriScraper:
         for match in header_iter:
             key = match.group(2).strip().lower()
             val = match.group(3).strip()
-            if key in ['cookie', 'content-length', 'accept-encoding']: continue
+            if key in ['cookie', 'content-length', 'accept-encoding', 'authority', 'host', 'priority']: continue
             self.headers[key] = val
 
         # 5. Body
